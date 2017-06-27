@@ -341,6 +341,12 @@ class MainView: NSView, URLSessionDataDelegate, URLSessionDelegate, URLSessionDo
         }
     }
     
+    /// 递归遍历指定目录，如果文件扩展名包含在 extensions 数组中，则对其进行调用 found
+    ///
+    /// - Parameters:
+    ///   - path: 指定要遍历的目录
+    ///   - extensions: 扩展名数组
+    ///   - found: 对符合条件的文件要进行的操作
     func recursiveDirectorySearch(_ path: String, extensions: [String], found: ((_ file: String) -> Void)){
         
         if let files = try? fileManager.contentsOfDirectory(atPath: path) {
@@ -458,13 +464,22 @@ class MainView: NSView, URLSessionDataDelegate, URLSessionDelegate, URLSessionDo
         }
         return codesignTask
     }
-    func testSigning(_ certificate: String, tempFolder: String )->Bool? {
+    
+    /// 用自身可执行文件进行签名测试
+    /// 目的应该是为了判断证书是否可用
+    ///
+    /// - Parameters:
+    ///   - certificate: 证书
+    ///   - tempFolder: 临时目录
+    /// - Returns: 签名测试是否成功
+    func testSigning(_ certificate: String, tempFolder: String ) -> Bool? {
         let codesignTempFile = tempFolder.stringByAppendingPathComponent("test-sign")
         
         // Copy our binary to the temp folder to use for testing.
+        // 将自身的可执行文件（ios-app-signer）复制到临时目录，以进行签名测试
         let path = ProcessInfo.processInfo.arguments[0]
         if (try? fileManager.copyItem(atPath: path, toPath: codesignTempFile)) != nil {
-            codeSign(codesignTempFile, certificate: certificate, entitlements: nil, before: nil, after: nil)
+            _ = codeSign(codesignTempFile, certificate: certificate, entitlements: nil, before: nil, after: nil)
             
             let verificationTask = Process().execute(codesignPath, workingDirectory: nil, arguments: ["-v",codesignTempFile])
             try? fileManager.removeItem(atPath: codesignTempFile)
@@ -494,7 +509,10 @@ class MainView: NSView, URLSessionDataDelegate, URLSessionDelegate, URLSessionDo
             controlsEnabled(true)
         }
     }
-    
+
+    /*********************************/
+    /******** 重签名的关键方法 **********/
+    /*********************************/
     func signingThread(){
         
         
@@ -513,13 +531,13 @@ class MainView: NSView, URLSessionDataDelegate, URLSessionDelegate, URLSessionDo
         
         //MARK: Sanity checks
         
-        // Check signing certificate selection
+        // 检查证书是否选择
         if signingCertificate == nil {
             setStatus("No signing certificate selected")
             return
         }
         
-        // Check if input file exists
+        // 检查输入文件是否存在
         var inputIsDirectory: ObjCBool = false
         if !inputStartsWithHTTP && !fileManager.fileExists(atPath: inputFile, isDirectory: &inputIsDirectory){
             DispatchQueue.main.async(execute: {
@@ -534,6 +552,7 @@ class MainView: NSView, URLSessionDataDelegate, URLSessionDelegate, URLSessionDo
         }
         
         //MARK: Create working temp folder
+        // 创建临时目录
         var tempFolder: String! = nil
         if let tmpFolder = makeTempFolder() {
             tempFolder = tmpFolder
@@ -541,9 +560,21 @@ class MainView: NSView, URLSessionDataDelegate, URLSessionDelegate, URLSessionDo
             setStatus("Error creating temp folder")
             return
         }
+        /*
+        ** /var/folders/f1/l34v14991zb2t7dh86242tw00000gp/T/com.DanTheMan827.AppSigner.sj7FNSQX/out
+        */
         let workingDirectory = tempFolder.stringByAppendingPathComponent("out")
+        /*
+        ** /var/folders/f1/l34v14991zb2t7dh86242tw00000gp/T/com.DanTheMan827.AppSigner.sj7FNSQX/out/Payload
+        */
         let eggDirectory = tempFolder.stringByAppendingPathComponent("eggs")
+        /*
+        ** /var/folders/f1/l34v14991zb2t7dh86242tw00000gp/T/com.DanTheMan827.AppSigner.sj7FNSQX/eggs
+        */
         let payloadDirectory = workingDirectory.stringByAppendingPathComponent("Payload/")
+        /*
+        ** /var/folders/f1/l34v14991zb2t7dh86242tw00000gp/T/com.DanTheMan827.AppSigner.sj7FNSQX/entitlements.plist
+        */
         let entitlementsPlist = tempFolder.stringByAppendingPathComponent("entitlements.plist")
         
         Log.write("Temp folder: \(tempFolder)")
@@ -551,7 +582,7 @@ class MainView: NSView, URLSessionDataDelegate, URLSessionDelegate, URLSessionDo
         Log.write("Payload directory: \(payloadDirectory)")
         
         //MARK: Codesign Test
-        
+        // 签名测试
         DispatchQueue.main.async(execute: {
             if let codesignResult = self.testSigning(signingCertificate!, tempFolder: tempFolder) {
                 if codesignResult == false {
@@ -581,7 +612,7 @@ class MainView: NSView, URLSessionDataDelegate, URLSessionDelegate, URLSessionDo
             continueSigning = true
         })
         
-        
+        // 如果测试失败，同时又修复失败，说明是证书有问题，只能拜拜了
         while true {
             if continueSigning != nil {
                 if continueSigning! == false {
@@ -594,6 +625,8 @@ class MainView: NSView, URLSessionDataDelegate, URLSessionDelegate, URLSessionDo
         }
         
         //MARK: Create Egg Temp Directory
+        // 创建 Egg 临时目录
+        // P.S. Egg 是什么东西，目的不明
         do {
             try fileManager.createDirectory(atPath: eggDirectory, withIntermediateDirectories: true, attributes: nil)
         } catch let error as NSError {
@@ -603,6 +636,7 @@ class MainView: NSView, URLSessionDataDelegate, URLSessionDelegate, URLSessionDo
         }
         
         //MARK: Download file
+        // 如果指定的输入文件是以 http 开头，则会对其进行下载
         downloading = false
         downloadError = nil
         downloadPath = tempFolder.stringByAppendingPathComponent("download.\(inputFile.pathExtension)")
@@ -632,7 +666,8 @@ class MainView: NSView, URLSessionDataDelegate, URLSessionDelegate, URLSessionDo
         }
         
         //MARK: Process input file
-        switch(inputFile.pathExtension.lowercased()){
+        // 对输入文件进行处理
+        switch(inputFile.pathExtension.lowercased()){ // 判断输入文件类型
         case "deb":
             //MARK: --Unpack deb
             let debPath = tempFolder.stringByAppendingPathComponent("deb")
@@ -753,6 +788,7 @@ class MainView: NSView, URLSessionDataDelegate, URLSessionDelegate, URLSessionDo
                 Log.write(Process().execute(defaultsPath, workingDirectory: nil, arguments: ["delete",appBundleInfoPlist,"CFBundleResourceSpecification"]).output)
                 
                 //MARK: Copy Provisioning Profile
+                // 将描述文件拷贝到应用 bundle 中，如果原来的 bundle 中有描述文件，先进行删除
                 if provisioningFile != nil {
                     if fileManager.fileExists(atPath: appBundleProvisioningFilePath) {
                         setStatus("Deleting embedded.mobileprovision")
@@ -775,6 +811,8 @@ class MainView: NSView, URLSessionDataDelegate, URLSessionDelegate, URLSessionDo
                 }
                 
                 //MARK: Generate entitlements.plist
+                // 生成 entitlements.plist 文件，从描述文件中获得 Entitlements 段的内容，
+                // 写入到 entitlements.plist 文件中
                 if provisioningFile != nil || useAppBundleProfile {
                     setStatus("Parsing entitlements")
                     
@@ -804,23 +842,24 @@ class MainView: NSView, URLSessionDataDelegate, URLSessionDelegate, URLSessionDo
                 }
                 
                 //MARK: Make sure that the executable is well... executable.
+                // 设置可执行文件的执行权限 755
                 if let bundleExecutable = getPlistKey(appBundleInfoPlist, keyName: "CFBundleExecutable"){
-                    Process().execute(chmodPath, workingDirectory: nil, arguments: ["755", appBundlePath.stringByAppendingPathComponent(bundleExecutable)])
+                    _ = Process().execute(chmodPath, workingDirectory: nil, arguments: ["755", appBundlePath.stringByAppendingPathComponent(bundleExecutable)])
                 }
                 
                 //MARK: Change Application ID
+                // 递归设置应用的 bundleId
                 if newApplicationID != "" {
-                    
                     if let oldAppID = getPlistKey(appBundleInfoPlist, keyName: "CFBundleIdentifier") {
                         func changeAppexID(_ appexFile: String){
                             let appexPlist = appexFile.stringByAppendingPathComponent("Info.plist")
                             if let appexBundleID = getPlistKey(appexPlist, keyName: "CFBundleIdentifier"){
                                 let newAppexID = "\(newApplicationID)\(appexBundleID.substring(from: oldAppID.endIndex))"
                                 setStatus("Changing \(appexFile) id to \(newAppexID)")
-                                setPlistKey(appexPlist, keyName: "CFBundleIdentifier", value: newAppexID)
+                                _ = setPlistKey(appexPlist, keyName: "CFBundleIdentifier", value: newAppexID)
                             }
                             if Process().execute(defaultsPath, workingDirectory: nil, arguments: ["read", appexPlist,"WKCompanionAppBundleIdentifier"]).status == 0 {
-                                setPlistKey(appexPlist, keyName: "WKCompanionAppBundleIdentifier", value: newApplicationID)
+                                _ = setPlistKey(appexPlist, keyName: "WKCompanionAppBundleIdentifier", value: newApplicationID)
                             }
                             recursiveDirectorySearch(appexFile, extensions: ["app"], found: changeAppexID)
                         }
@@ -834,8 +873,6 @@ class MainView: NSView, URLSessionDataDelegate, URLSessionDelegate, URLSessionDo
                         Log.write(IDChangeTask.output)
                         cleanup(tempFolder); return
                     }
-                    
-                    
                 }
                 
                 //MARK: Change Display Name
@@ -908,6 +945,7 @@ class MainView: NSView, URLSessionDataDelegate, URLSessionDelegate, URLSessionDo
                 let signableExtensions = ["dylib","so","0","vis","pvr","framework","appex","app"]
                 
                 //MARK: Codesigning - Eggs
+                // Eggs 到底是什么鬼？
                 let eggSigningFunction = generateFileSignFunc(eggDirectory, entitlementsPath: entitlementsPlist, signingCertificate: signingCertificate!)
                 func signEgg(_ eggFile: String){
                     eggCount += 1
@@ -957,7 +995,7 @@ class MainView: NSView, URLSessionDataDelegate, URLSessionDelegate, URLSessionDo
         }
         
         //MARK: Packaging
-        //Check if output already exists and delete if so
+        
         if fileManager.fileExists(atPath: outputFile!) {
             do {
                 try fileManager.removeItem(atPath: outputFile!)
@@ -967,12 +1005,16 @@ class MainView: NSView, URLSessionDataDelegate, URLSessionDelegate, URLSessionDo
                 cleanup(tempFolder); return
             }
         }
+        
+        // 使用 zip 进行打包
         setStatus("Packaging IPA")
         let zipTask = self.zip(workingDirectory, outputFile: outputFile!)
         if zipTask.status != 0 {
             setStatus("Error packaging IPA")
         }
+        
         //MARK: Cleanup
+        // 删除临时文件夹
         cleanup(tempFolder)
         setStatus("Done, output at \(outputFile!)")
     }
