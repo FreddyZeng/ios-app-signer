@@ -19,6 +19,9 @@ struct ProvisioningProfile {
         entitlements: AnyObject?
     fileprivate let delegate = NSApplication.shared().delegate as! AppDelegate
     
+    /// 遍历 ~/Library/MobileDevice/Provisioning\ Profiles 目录，获取所有描述方法
+    ///
+    /// - Returns: 描述文件列表
     static func getProfiles() -> [ProvisioningProfile] {
         var output: [ProvisioningProfile] = []
         

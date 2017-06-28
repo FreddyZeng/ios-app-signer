@@ -143,7 +143,9 @@ class MainView: NSView, URLSessionDataDelegate, URLSessionDelegate, URLSessionDo
             NibLoaded = true
             
             // Do any additional setup after loading the view.
+            // 获取描述文件列表
             populateProvisioningProfiles()
+            // 获取证书列表
             populateCodesigningCerts()
             if let defaultCert = defaults.string(forKey: "signingCertificate") {
                 if codesigningCerts.contains(defaultCert) {
@@ -216,6 +218,8 @@ class MainView: NSView, URLSessionDataDelegate, URLSessionDelegate, URLSessionDo
         formatter.timeStyle = .medium
         var newProfiles: [ProvisioningProfile] = []
         var zeroWidthPadding: String = ""
+        
+        // 删除描述文件列表中已经过期的描述文件
         for profile in provisioningProfiles {
             zeroWidthPadding = "\(zeroWidthPadding)\(zeroWidthSpace)"
             if profile.expires.timeIntervalSince1970 > Date().timeIntervalSince1970 {
